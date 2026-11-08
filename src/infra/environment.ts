@@ -60,9 +60,11 @@ export function agentVariables(stateDir: string): Record<string, string | undefi
 /** True when a regular file starts with the dsh-superagent marker in its first two lines; a symbolic link, directory, or other non-regular file never counts as written by dsh-superagent. */
 async function written(file: string): Promise<boolean> {
   if (!(await lstat(file)).isFile()) return false
-  const head = (await readFile(file, 'utf8')).split('\n', 2)
+  // A Windows `.cmd` shim carries the marker after `@rem `, and its lines may end in CRLF.
+  const head = (await readFile(file, 'utf8')).split('\n', 2).map(line => line.replace(/\r$/, '').replace(/^@rem /, ''))
   return [MARKER, ...LEGACY_MARKERS].some(marker => head.includes(marker))
 }
+const WINDOWS = process.platform === 'win32'
 async function own(file: string, text: string, mode = 0o644): Promise<void> {
   let foreign = false
   try { foreign = !await written(file) } catch { /* The file does not exist yet. */ }
@@ -84,9 +86,11 @@ export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' |
   for (const name of before) { const file = join(dir, name); if (!await written(file)) throw new SetupError('foreignFile', { file }) }
   // Workers may be running concurrently: write each shim to a temp file and atomically rename it so no command ever resolves past the shim directory.
   const kept = new Set<string>()
-  const shim = async (name: string, body: string): Promise<void> => {
+  const shim = async (command: string, body: string): Promise<void> => {
+    // Windows resolves a command through PATHEXT, so a shim there is a batch file `<name>.cmd`.
+    const name = WINDOWS ? `${command}.cmd` : command
     const temporary = join(dir, `.${name}.${process.pid}.tmp`)
-    await writeFile(temporary, `#!/bin/sh\n${MARKER}\n${body}\n`, { mode: 0o755 })
+    await writeFile(temporary, WINDOWS ? `@echo off\r\n@rem ${MARKER}\r\n${body.replaceAll('\n', '\r\n')}\r\n` : `#!/bin/sh\n${MARKER}\n${body}\n`, { mode: 0o755 })
     await rename(temporary, join(dir, name))
     kept.add(name)
   }
@@ -95,8 +99,14 @@ export async function writeEnvironment(deployment: Pick<Deployment, 'stateDir' |
     'for entry in $PATH; do [ "$entry" = "$self" ] || rest="${rest:+$rest:}$entry"; done',
     'set +f', 'unset IFS', 'PATH=$rest', 'export PATH',
   ].join('\n')
-  const run = (program: string): string => `${withoutShims}\nexec ${shellQuote(program)} "$@"`
-  const fail = (message: string): string => `echo ${shellQuote(message)} >&2\nexit 1`
+  // cmd.exe: drop the shim directory from PATH (computed now from the host PATH), then run the target.
+  const cmdQuote = (value: string): string => value.replace(/%/g, '%%')
+  const run = (program: string): string => WINDOWS
+    ? `set "PATH=${cmdQuote(withoutDirectory(process.env.PATH ?? '', dir))}"\n"${cmdQuote(program)}" %*\nexit /b %ERRORLEVEL%`
+    : `${withoutShims}\nexec ${shellQuote(program)} "$@"`
+  const fail = (message: string): string => WINDOWS
+    ? `echo ${cmdQuote(message).replace(/[&|<>^()]/g, '^$&')} 1>&2\nexit /b 1`
+    : `echo ${shellQuote(message)} >&2\nexit 1`
   await shim('gh', run(github.cli))
   await shim('lark-cli', feishu ? run(feishu.cli) : fail('lark-cli is unavailable: this installation has no Feishu bot.'))
   for (const name of new Set(blockedCommands.filter(name => !WORKER_COMMANDS.includes(name)))) {
@@ -139,7 +149,9 @@ export async function verifyEnvironment(deployment: Pick<Deployment, 'github' | 
   const { github, stateDir } = deployment
   // `-z` separates fields with NUL and never quotes paths.
   const helpers = (await runAsWorker(subprocess, ['git', 'config', '-z', '--show-origin', '--get-all', 'credential.https://github.com.helper'], stateDir, AbortSignal.any([signal, AbortSignal.timeout(60_000)])).catch(() => '')).split('\0')
-  if (helpers.join('\0') !== [`file:${workerGitConfig(stateDir)}`, credentialHelper(github.cli), ''].join('\0')) throw new SetupError('gitTooOld')
+  // Git for Windows reports the origin with forward slashes and may change the drive letter's case.
+  const normal = (value: string): string => WINDOWS ? value.replaceAll('\\', '/').toLowerCase() : value
+  if (normal(helpers.join('\0')) !== normal([`file:${workerGitConfig(stateDir)}`, credentialHelper(github.cli), ''].join('\0'))) throw new SetupError('gitTooOld')
 }
 
 /**

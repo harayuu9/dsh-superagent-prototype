@@ -29,6 +29,17 @@ It asks one short question at a time, shows the full plan once, and then install
   - 主 Session で `pwsh` を使える。
 - **`scripts/setup-profile.mjs`**：superagent を入れた DSH プロファイルを作って起動する。Node だけで動くので Windows と Linux の両方で使える。
 
+### 別の PC に導入する手順
+
+1. **前提のツールを入れる**：Node.js 22.19 以上または 24 以上、pnpm、git 2.32 以上、GitHub CLI 2.48 以上、`@deepseek-ai/dsh`（`engines.dsh` の範囲内）。Windows では `pwsh`（PowerShell 7）も入れる。
+2. **コピー元のプロファイルを用意する**：普段使う DSH プロファイル（例：`web`）でモデルにログインし、使うプラグインを入れておく。プロファイルとログイン情報は PC ごとにあり、git では持ち運べない。
+3. **このリポジトリを clone してビルドする**：`pnpm install && pnpm build`。
+4. **エージェント用の `gh` を用意してログインする**：下の 4 を参照。
+5. **プロファイルを作って起動する**：`node scripts/setup-profile.mjs superagent --port 3082`。
+6. **Superagent の設定をする**：Superagent の設定は PC ごとの `stateDir` に保存されるので、新しい PC では最初からやり直す。対象は GitHub Source（リポジトリと CLI の絶対パス）、Policy（頼める人）、Execution（作業ディレクトリと prepare コマンド。clone 先のパスに合わせる）、プロンプト（コミットの作者）。画面の **Superagent → 設定** から設定する。
+
+同じエージェントのアカウントと同じリポジトリで、2 台の PC から同時に Superagent を動かさないこと。どちらも同じ通知を読み、同じ依頼に二重に反応する。
+
 ### 1. ビルド
 
 ```sh
@@ -105,8 +116,11 @@ node scripts/setup-profile.mjs superagent-foo --port 3083
   ログインはエージェントのアカウントで行う。
 
   ```powershell
-  & "$env:USERPROFILE\.local\bin\gh-agent.exe" auth login --hostname github.com --git-protocol https --web
+  & "$env:USERPROFILE\.local\bin\gh-agent.exe" auth login --hostname github.com --git-protocol https --web --insecure-storage
   ```
+
+- **`--insecure-storage` を必ず付ける（Windows / Linux 共通）:** 付けないと、トークンが OS のキーリング（Windows では資格情報マネージャー）に保存される。そこでは `GH_CONFIG_DIR` が違っても同じ項目を使うので、普段の `gh` までエージェントのアカウントで動くようになる。付けると、トークンは `gh-agent` の設定フォルダの `hosts.yml` にだけ保存される。
+- **混ざってしまったら:** 普段の `gh` は `gh auth switch --user <自分のアカウント>` で戻す。git の資格情報（Windows では `cmdkey /list` の `git:https://github.com`）がエージェントになっていたら、その項目を削除する。
 
 ### 5. Windows での prepare コマンド
 

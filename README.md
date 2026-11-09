@@ -27,18 +27,46 @@ It asks one short question at a time, shows the full plan once, and then install
   - `gh` などの差し替えファイル（シム）を `.cmd` で書き出す。
   - prepare コマンドを `pwsh` で実行する。
   - 主 Session で `pwsh` を使える。
-- **`scripts/setup-profile.mjs`**：superagent を入れた DSH プロファイルを作って起動する。Node だけで動くので Windows と Linux の両方で使える。
+- **`scripts/bootstrap.mjs`**：新しい PC で、ツールの確認からビルド、`gh-agent` の用意、プロファイルの起動、Superagent の設定までを 1 回で行う。
+- **`scripts/setup-profile.mjs`**：superagent を入れた DSH プロファイルを作って起動する（`bootstrap.mjs` も中でこれを使う）。
+- **`scripts/gh-agent.cs`**：Windows 用のエージェント `gh` ラッパーのソース。`bootstrap.mjs` が Windows 標準の `csc.exe` でコンパイルする。
 
-### 別の PC に導入する手順
+どのスクリプトも Node だけで動くので、Windows と Linux の両方で使える。
 
-1. **前提のツールを入れる**：Node.js 22.19 以上または 24 以上、pnpm、git 2.32 以上、GitHub CLI 2.48 以上、`@deepseek-ai/dsh`（`engines.dsh` の範囲内）。Windows では `pwsh`（PowerShell 7）も入れる。
-2. **コピー元のプロファイルを用意する**：普段使う DSH プロファイル（例：`web`）でモデルにログインし、使うプラグインを入れておく。プロファイルとログイン情報は PC ごとにあり、git では持ち運べない。
-3. **このリポジトリを clone してビルドする**：`pnpm install && pnpm build`。
-4. **エージェント用の `gh` を用意してログインする**：下の 4 を参照。
-5. **プロファイルを作って起動する**：`node scripts/setup-profile.mjs superagent --port 3082`。
-6. **Superagent の設定をする**：Superagent の設定は PC ごとの `stateDir` に保存されるので、新しい PC では最初からやり直す。対象は GitHub Source（リポジトリと CLI の絶対パス）、Policy（頼める人）、Execution（作業ディレクトリと prepare コマンド。clone 先のパスに合わせる）、プロンプト（コミットの作者）。画面の **Superagent → 設定** から設定する。
+### 別の PC に導入する（`bootstrap.mjs`）
 
-同じエージェントのアカウントと同じリポジトリで、2 台の PC から同時に Superagent を動かさないこと。どちらも同じ通知を読み、同じ依頼に二重に反応する。
+```sh
+git clone https://github.com/harayuu9/dsh-superagent-prototype.git
+cd dsh-superagent-prototype
+node scripts/bootstrap.mjs --repo polyscape-org/Kuebiko --allow harayuu9 --clone ~/src/Kuebiko
+```
+
+1. **ツール**：Node.js、git、gh のバージョンを確かめる。Windows では `pwsh` も確かめる。pnpm と dsh がなければ npm で入れる（dsh の版は `--dsh-version`、既定 0.2.1-rc.3）。
+2. **コピー元のプロファイル**：`--from`（既定は `web`）がなければ作る。モデルのログインがなければ、ログインするよう案内して待つ。
+3. **ビルド**：`pnpm install && pnpm build`。
+4. **`gh-agent`**：Windows では `scripts/gh-agent.cs` から `.exe` を、それ以外ではシェルスクリプトを、`~/.local/bin` に作る。ログインしていなければ、ブラウザでエージェントのアカウントにログインさせる（`--insecure-storage` 付き）。`--repo` には push できるかも確かめる。
+5. **clone**：`--clone` のパスに clone がなければ `--repo` から clone する。作業ディレクトリは既定で `<clone>/../work`。
+6. **プロファイル**：`setup-profile.mjs` で作って起動する。すでに動いていれば、再起動せずに更新だけする。
+7. **Superagent の設定**：管理 API で保存する。保存するのは GitHub Source（リポジトリと、この PC の `gh-agent` のパス）、Policy（`--allow`）、Execution（作業ディレクトリと、この PC の clone を使う prepare コマンド）、プロンプト（コミットの作者。既定はエージェントのアカウント。auto-merge なし）。
+
+| オプション | 内容 |
+|---|---|
+| `--profile <名前>` / `--port <n>` / `--from <名前>` | 作るプロファイル（既定 `superagent`）、ポート（既定 3082）、コピー元（既定 `web`） |
+| `--repo <owner/name>` | 対象のリポジトリ |
+| `--allow <login,...>` | 依頼できる GitHub アカウント |
+| `--clone <dir>` / `--work <dir>` | ワークツリーの元になる clone と、作業ディレクトリ |
+| `--author <login>` | コミットの作者（既定はエージェントのアカウント） |
+| `--export <file>` | 動いているプロファイルの設定を JSON に書き出して終わる |
+| `--settings <file>` | `--export` の JSON を読み込んで反映する。PC ごとに違うパス（CLI、clone）はこの PC の値に置き換わる |
+| `--skip-login` / `--yes` | ログインしない、質問しない。人の手が要るところでは止まる |
+
+- **自動化できない手順**：ツール本体（Node.js、git、gh、pwsh）のインストール、モデルのログイン、エージェントの GitHub ログインは人がやる。足りないものがあると、スクリプトはやり方を表示して止まるか、待つ。
+- **何度実行してもよい**：済んでいる手順は飛ばす。
+- **設定を持ち運ぶ**：今の PC で `node scripts/bootstrap.mjs --export superagent.json` を実行し、新しい PC で `--settings superagent.json --clone <パス>` を付けて実行する。JSON に秘密の情報は入らない（認証は各 PC の `gh-agent` が持つ）。
+
+同じエージェントのアカウントと同じリポジトリで、2 台の PC から同時に Superagent を動かさないこと。どちらも同じ通知を読み、同じ依頼に二重に反応する。移すときは、先に元の PC の Superagent を止める。
+
+以下は、スクリプトがやっていることを一つずつ手でやる場合の説明。
 
 ### 1. ビルド
 
@@ -92,25 +120,10 @@ node scripts/setup-profile.mjs superagent-foo --port 3083
 エージェント専用の設定ディレクトリを使う `gh` のラッパーを用意し、GitHub Source の「CLI」に絶対パスで指定します。
 
 - **Linux / macOS:** [006 Deployment](docs/006-deployment.md) にある `gh-agent` のシェルスクリプト。
-- **Windows:** 実行ファイル（`.exe`）にする。バッチファイル（`.cmd`）は、Node の `execFile` が `EINVAL` で起動を拒否する（Node のセキュリティ修正による）。設定の保存時のチェックは通ってしまうが、ポーリングで失敗する。例えば次の Go のコードを `go build -o %USERPROFILE%\.local\bin\gh-agent.exe` でビルドする。
+- **Windows:** 実行ファイル（`.exe`）にする。バッチファイル（`.cmd`）は、Node の `execFile` が `EINVAL` で起動を拒否する（Node のセキュリティ修正による）。設定の保存時のチェックは通ってしまうが、ポーリングで失敗する。`bootstrap.mjs` は [scripts/gh-agent.cs](scripts/gh-agent.cs) を Windows 標準の C# コンパイラでビルドする。手でビルドするなら次のとおり。
 
-  ```go
-  package main
-
-  import ("os"; "os/exec"; "path/filepath")
-
-  func main() {
-  	home, _ := os.UserHomeDir()
-  	gh, err := exec.LookPath("gh")
-  	if err != nil { gh = `C:\Program Files\GitHub CLI\gh.exe` }
-  	cmd := exec.Command(gh, os.Args[1:]...)
-  	cmd.Env = append(os.Environ(), "GH_CONFIG_DIR="+filepath.Join(home, ".config", "gh-agent"))
-  	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-  	if err := cmd.Run(); err != nil {
-  		if e, ok := err.(*exec.ExitError); ok { os.Exit(e.ExitCode()) }
-  		os.Exit(1)
-  	}
-  }
+  ```powershell
+  & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /optimize "/out:$env:USERPROFILE\.local\bin\gh-agent.exe" scripts\gh-agent.cs
   ```
 
   ログインはエージェントのアカウントで行う。

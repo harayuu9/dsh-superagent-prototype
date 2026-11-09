@@ -148,9 +148,24 @@ const git = output('git', ['--version'])
 if (!git) fail('git is not installed: install git 2.32 or later')
 if (!atLeast(git.replace(/^git version /, ''), '2.32')) fail(`git 2.32 or later is required (${git})`)
 log(git)
+/** How to install a current gh. Distribution packages (Ubuntu's `gh` is 2.46) lag behind; GitHub's apt repository does not. */
+function ghInstallHint() {
+  if (WINDOWS) return 'winget install GitHub.cli   (or: winget upgrade GitHub.cli)'
+  if (existsSync('/etc/debian_version')) return [
+    "GitHub's apt repository (Ubuntu's own gh package is too old):",
+    '  sudo mkdir -p -m 755 /etc/apt/keyrings',
+    '  wget -nv -O- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null',
+    '  sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg',
+    '  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null',
+    '  sudo apt update && sudo apt install gh',
+    'then re-run this script.',
+  ].join('\n')
+  if (process.platform === 'darwin') return 'brew install gh   (or: brew upgrade gh)'
+  return 'see https://github.com/cli/cli#installation'
+}
 const gh = output('gh', ['--version'])?.split('\n')[0]
-if (!gh) fail(`the GitHub CLI is not installed: ${WINDOWS ? 'winget install GitHub.cli' : 'see https://cli.github.com'}`)
-if (!atLeast(gh.replace(/^gh version /, ''), '2.48')) fail(`GitHub CLI 2.48 or later is required (${gh})`)
+if (!gh) fail(`the GitHub CLI is not installed. Install it with ${ghInstallHint()}`)
+if (!atLeast(gh.replace(/^gh version /, ''), '2.48')) fail(`GitHub CLI 2.48 or later is required (${gh}). Update it with ${ghInstallHint()}`)
 log(gh)
 if (WINDOWS) {
   if (!output('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'])) fail('PowerShell 7 (pwsh) is required for the prepare command: winget install Microsoft.PowerShell')

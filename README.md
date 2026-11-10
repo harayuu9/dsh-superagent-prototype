@@ -56,6 +56,7 @@ node scripts/bootstrap.mjs --repo polyscape-org/Kuebiko --allow harayuu9 --clone
 | `--allow <login,...>` | 依頼できる GitHub アカウント |
 | `--clone <dir>` / `--work <dir>` | ワークツリーの元になる clone と、作業ディレクトリ |
 | `--author <login>` | コミットの作者（既定はエージェントのアカウント） |
+| `--disclose` | GitHub の投稿の先頭に「This is by an automated agent, not a human.」を付ける既定の一文を残す（付けなければ消す） |
 | `--export <file>` | 動いているプロファイルの設定を JSON に書き出して終わる |
 | `--settings <file>` | `--export` の JSON を読み込んで反映する。PC ごとに違うパス（CLI、clone）はこの PC の値に置き換わる |
 | `--skip-login` / `--yes` | ログインしない、質問しない。人の手が要るところでは止まる |

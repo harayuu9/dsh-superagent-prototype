@@ -24,6 +24,8 @@
  *   --clone <dir>           Local clone the tickets' worktrees come from; cloned from --repo when missing.
  *   --work <dir>            Directory of the tickets' worktrees (default: <clone>/../work).
  *   --author <login>        Commit author; the agent account when omitted. Written into the Delivery prompt.
+ *   --disclose              Keep the default line "This is by an automated agent, not a human." at the start of every
+ *                           GitHub message; it is removed otherwise.
  *   --settings <file>       JSON of settings to apply as is (see --export); flags above override it.
  *   --export <file>         Write the running profile's settings to <file> and exit, to carry them to another machine.
  *
@@ -59,7 +61,7 @@ const { values: opts } = (() => {
   try {
     return parseArgs({ options: {
       profile: { type: 'string', default: 'superagent' }, port: { type: 'string', default: '3082' }, from: { type: 'string', default: 'web' },
-      repo: { type: 'string' }, allow: { type: 'string' }, clone: { type: 'string' }, work: { type: 'string' }, author: { type: 'string' },
+      repo: { type: 'string' }, allow: { type: 'string' }, clone: { type: 'string' }, work: { type: 'string' }, author: { type: 'string' }, disclose: { type: 'boolean', default: false },
       settings: { type: 'string' }, export: { type: 'string' }, 'dsh-version': { type: 'string', default: '0.2.1-rc.3' },
       'skip-login': { type: 'boolean', default: false }, yes: { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h', default: false },
     } })
@@ -343,8 +345,12 @@ if (wantsSettings) {
       delivery += `\nCommit author: commit as ${author}, with \`git -c user.name=${author} -c user.email=${email} commit\`, or set them with \`git config user.name\` / \`user.email\` in the ticket's worktree. The commit author is ${author}.`
     }
     config.delivery = delivery
+    // The default Communication section makes every GitHub message start with a disclosure line; drop it unless --disclose.
+    if (!opts.disclose && typeof config.communication === 'string') {
+      config.communication = config.communication.replace(/Begin every message posted on GitHub[^\n]*?not a human\.(?: IM messages do not carry it:[^\n]*?identifies itself\.)?\n?/, '')
+    }
     await call('PUT', 'prompts', { config, baseRevision: prompts.current.revision })
-    log(`Prompts: commit author ${author ?? '(as imported)'}, no auto-merge`)
+    log(`Prompts: commit author ${author ?? '(as imported)'}, no auto-merge${opts.disclose ? '' : ', no "automated agent" line on GitHub'}`)
   }
 }
 

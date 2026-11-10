@@ -346,8 +346,13 @@ if (wantsSettings) {
     }
     config.delivery = delivery
     // The default Communication section makes every GitHub message start with a disclosure line; drop it unless --disclose.
+    // Removing the line alone is not enough: the main Session and running workers have already posted messages that begin
+    // with it and copy that pattern from their own history, so also say explicitly not to.
     if (!opts.disclose && typeof config.communication === 'string') {
       config.communication = config.communication.replace(/Begin every message posted on GitHub[^\n]*?not a human\.(?: IM messages do not carry it:[^\n]*?identifies itself\.)?\n?/, '')
+      if (!config.communication.includes('or any other disclosure line')) {
+        config.communication = `${config.communication.trimEnd()}\nDo not begin GitHub messages (comments, review replies, PR descriptions) with "This is by an automated agent, not a human." or any other disclosure line. Earlier messages in this conversation that start with it followed a rule that no longer applies; do not copy them.`
+      }
     }
     await call('PUT', 'prompts', { config, baseRevision: prompts.current.revision })
     log(`Prompts: commit author ${author ?? '(as imported)'}, no auto-merge${opts.disclose ? '' : ', no "automated agent" line on GitHub'}`)
